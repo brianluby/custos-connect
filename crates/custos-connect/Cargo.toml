@@ -1,0 +1,32 @@
+[package]
+name = "custos-connect"
+version = "0.1.0"
+description = "Composable Rust SDK for paginated and incremental HTTP ingestion"
+readme = "README.md"
+repository = "https://github.com/brianluby/custos-connect"
+keywords = ["connector", "ingestion", "pagination", "sync", "tower"]
+categories = ["api-bindings", "asynchronous", "web-programming::http-client"]
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = "0.1.89"
+base64 = "0.22"
+fastrand = "2"
+governor = { version = "0.10", default-features = false, features = ["std", "quanta"] }
+httpdate = "1"
+reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
+secrecy = "0.10"
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["time"] }
+tower = { version = "0.5", features = ["retry", "util"] }
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+wiremock = "=0.6.5"
