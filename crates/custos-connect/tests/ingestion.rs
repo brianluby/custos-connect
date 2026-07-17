@@ -6,7 +6,7 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime},
 };
 
 use async_trait::async_trait;
@@ -304,13 +304,13 @@ async fn session_rejects_a_repeated_cursor() -> Result<(), Box<dyn std::error::E
 #[derive(Clone)]
 struct FlakyResponder {
     calls: Arc<AtomicUsize>,
-    retry_after: Option<&'static str>,
+    retry_after: Option<String>,
 }
 
 impl Respond for FlakyResponder {
     fn respond(&self, _request: &MockRequest) -> ResponseTemplate {
         if self.calls.fetch_add(1, Ordering::SeqCst) == 0 {
-            self.retry_after.map_or_else(
+            self.retry_after.as_deref().map_or_else(
                 || ResponseTemplate::new(503),
                 |retry_after| ResponseTemplate::new(503).insert_header("retry-after", retry_after),
             )
@@ -410,32 +410,38 @@ async fn retry_layer_retries_post_when_all_methods_are_enabled()
 }
 
 #[tokio::test]
-async fn retry_after_is_bounded_by_max_backoff() -> Result<(), Box<dyn std::error::Error>> {
-    let server = MockServer::start().await;
-    let calls = Arc::new(AtomicUsize::new(0));
-    Mock::given(method("GET"))
-        .and(path("/hostile-retry-after"))
-        .respond_with(FlakyResponder {
-            calls: Arc::clone(&calls),
-            retry_after: Some("86400"),
-        })
-        .expect(2)
-        .mount(&server)
-        .await;
-    let attempts = NonZeroU32::new(2).ok_or("attempt count must be nonzero")?;
-    let policy = RetryPolicy::new(attempts)
-        .with_backoff(Duration::from_millis(1), Duration::from_millis(5))
-        .with_jitter(Jitter::None);
-    let client = HttpClientBuilder::new(fast_quota(), policy).build()?;
-    let request = Request::new(
-        Method::GET,
-        Url::parse(&format!("{}/hostile-retry-after", server.uri()))?,
-    );
+async fn retry_after_forms_are_bounded_by_max_backoff() -> Result<(), Box<dyn std::error::Error>> {
+    let future = SystemTime::now()
+        .checked_add(Duration::from_secs(86_400))
+        .ok_or("future HTTP date overflowed SystemTime")?;
+    for retry_after in ["86400".to_owned(), httpdate::fmt_http_date(future)] {
+        let server = MockServer::start().await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        Mock::given(method("GET"))
+            .and(path("/hostile-retry-after"))
+            .respond_with(FlakyResponder {
+                calls: Arc::clone(&calls),
+                retry_after: Some(retry_after),
+            })
+            .expect(2)
+            .mount(&server)
+            .await;
+        let attempts = NonZeroU32::new(2).ok_or("attempt count must be nonzero")?;
+        let policy = RetryPolicy::new(attempts)
+            .with_backoff(Duration::from_millis(1), Duration::from_millis(5))
+            .with_jitter(Jitter::None);
+        let client = HttpClientBuilder::new(fast_quota(), policy).build()?;
+        let request = Request::new(
+            Method::GET,
+            Url::parse(&format!("{}/hostile-retry-after", server.uri()))?,
+        );
 
-    let response =
-        tokio::time::timeout(Duration::from_millis(250), client.execute(request)).await??;
+        let response =
+            tokio::time::timeout(Duration::from_millis(250), client.execute(request)).await??;
 
-    assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(response.status(), reqwest::StatusCode::OK);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
     Ok(())
 }
 

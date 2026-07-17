@@ -67,7 +67,7 @@ where
     }
 }
 
-/// Decode pages from any Faucet source without buffering the complete ingestion.
+/// Decode pages emitted by a Faucet source while preserving its fetching behavior.
 ///
 /// The caller must durably consume `TypedPage::records` before persisting the
 /// corresponding `TypedPage::checkpoint`.
@@ -75,7 +75,8 @@ where
 /// # Errors
 ///
 /// Each stream item returns [`TypedSourceError::Source`] when Faucet fails to
-/// fetch a page or [`TypedSourceError::Decode`] when a record has the wrong shape.
+/// fetch a page or [`TypedSourceError::Decode`] when a record has the wrong
+/// shape. The stream terminates after its first error.
 pub fn typed_pages<'a, S, T>(
     source: &'a S,
     context: &'a HashMap<String, Value>,
@@ -85,10 +86,17 @@ where
     S: Source + ?Sized,
     T: DeserializeOwned + Send + 'a,
 {
-    let pages = source.stream_pages(context, batch_size).map(|result| {
-        result
+    let pages = source.stream_pages(context, batch_size);
+    let pages = futures::stream::unfold((pages, false), |(mut pages, terminated)| async move {
+        if terminated {
+            return None;
+        }
+        let result = pages.next().await?;
+        let item = result
             .map_err(TypedSourceError::from)
-            .and_then(TypedPage::try_from)
+            .and_then(TypedPage::try_from);
+        let terminated = item.is_err();
+        Some((item, (pages, terminated)))
     });
 
     Box::pin(pages)
@@ -96,15 +104,48 @@ where
 
 #[cfg(test)]
 mod tests {
-    use faucet_core::StreamPage;
-    use serde::Deserialize;
-    use serde_json::json;
+    use std::{collections::HashMap, pin::Pin};
 
-    use super::{TypedPage, TypedSourceError};
+    use async_trait::async_trait;
+    use faucet_core::{FaucetError, Source, StreamPage};
+    use futures::{Stream, StreamExt, stream};
+    use serde::Deserialize;
+    use serde_json::{Value, json};
+
+    use super::{TypedPage, TypedSourceError, typed_pages};
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct Record {
         id: u64,
+    }
+
+    struct ErrorThenPageSource;
+
+    #[async_trait]
+    impl Source for ErrorThenPageSource {
+        async fn fetch_with_context(
+            &self,
+            _context: &HashMap<String, Value>,
+        ) -> Result<Vec<Value>, FaucetError> {
+            Ok(Vec::new())
+        }
+
+        fn stream_pages<'a>(
+            &'a self,
+            _context: &'a HashMap<String, Value>,
+            _batch_size: usize,
+        ) -> Pin<Box<dyn Stream<Item = Result<StreamPage, FaucetError>> + Send + 'a>> {
+            Box::pin(stream::iter([
+                Ok(StreamPage {
+                    records: vec![json!({"id": "not-a-number"})],
+                    bookmark: Some(json!("bad-checkpoint")),
+                }),
+                Ok(StreamPage {
+                    records: vec![json!({"id": 8})],
+                    bookmark: Some(json!("must-not-escape")),
+                }),
+            ]))
+        }
     }
 
     #[test]
@@ -139,5 +180,18 @@ mod tests {
             result,
             Err(TypedSourceError::Decode { index: 1, .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn typed_pages_stop_after_the_first_error() {
+        let source = ErrorThenPageSource;
+        let context = HashMap::new();
+        let mut pages = typed_pages::<_, Record>(&source, &context, 1);
+
+        assert!(matches!(
+            pages.next().await,
+            Some(Err(TypedSourceError::Decode { index: 0, .. }))
+        ));
+        assert!(pages.next().await.is_none());
     }
 }

@@ -25,8 +25,8 @@ pub enum PaginationError {
     #[error("pagination query parameter cannot be empty")]
     EmptyParameter,
 
-    /// A JSON Pointer is not empty and does not start with `/`.
-    #[error("pagination JSON Pointer must be empty or start with '/'")]
+    /// A response pointer is not valid RFC 6901 JSON Pointer syntax.
+    #[error("pagination JSON Pointer is not valid RFC 6901 syntax")]
     InvalidJsonPointer,
 
     /// The next cursor exists but is not a string or null.
@@ -133,12 +133,7 @@ impl Pagination for CursorPagination {
         request: &mut Request,
         cursor: Option<&Self::Cursor>,
     ) -> Result<(), PaginationError> {
-        if let Some(cursor) = cursor {
-            request
-                .url_mut()
-                .query_pairs_mut()
-                .append_pair(&self.query_parameter, cursor);
-        }
+        replace_query_parameter(request, &self.query_parameter, cursor.map(String::as_str));
         Ok(())
     }
 
@@ -200,10 +195,7 @@ impl Pagination for PageNumberPagination {
         cursor: Option<&Self::Cursor>,
     ) -> Result<(), PaginationError> {
         let page = cursor.copied().unwrap_or(self.first_page);
-        request
-            .url_mut()
-            .query_pairs_mut()
-            .append_pair(&self.query_parameter, &page.to_string());
+        replace_query_parameter(request, &self.query_parameter, Some(&page.to_string()));
         Ok(())
     }
 
@@ -224,6 +216,21 @@ impl Pagination for PageNumberPagination {
     }
 }
 
+fn replace_query_parameter(request: &mut Request, parameter: &str, value: Option<&str>) {
+    let retained_pairs = request
+        .url()
+        .query_pairs()
+        .filter(|(name, _value)| name != parameter)
+        .map(|(name, value)| (name.into_owned(), value.into_owned()))
+        .collect::<Vec<_>>();
+    let mut query = request.url_mut().query_pairs_mut();
+    query.clear();
+    query.extend_pairs(retained_pairs);
+    if let Some(value) = value {
+        query.append_pair(parameter, value);
+    }
+}
+
 fn validate_parameter(parameter: &str) -> Result<(), PaginationError> {
     if parameter.is_empty() {
         Err(PaginationError::EmptyParameter)
@@ -233,11 +240,25 @@ fn validate_parameter(parameter: &str) -> Result<(), PaginationError> {
 }
 
 fn validate_pointer(pointer: &str) -> Result<(), PaginationError> {
-    if pointer.is_empty() || pointer.starts_with('/') {
+    let valid = pointer.is_empty()
+        || pointer
+            .strip_prefix('/')
+            .is_some_and(|tokens| tokens.split('/').all(pointer_token_has_valid_escapes));
+    if valid {
         Ok(())
     } else {
         Err(PaginationError::InvalidJsonPointer)
     }
+}
+
+fn pointer_token_has_valid_escapes(token: &str) -> bool {
+    let mut bytes = token.bytes();
+    while let Some(byte) = bytes.next() {
+        if byte == b'~' && !matches!(bytes.next(), Some(b'0' | b'1')) {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -279,6 +300,36 @@ mod tests {
     }
 
     #[test]
+    fn cursor_pagination_replaces_existing_query_parameters()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let pagination = CursorPagination::new("after", "/paging/next")?;
+        let mut request = Request::new(
+            Method::GET,
+            Url::parse("https://example.test/items?after=stale&keep=yes&after=older")?,
+        );
+
+        pagination.apply(&mut request, Some(&"current".to_owned()))?;
+
+        let pairs = request
+            .url()
+            .query_pairs()
+            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pairs,
+            vec![
+                ("keep".to_owned(), "yes".to_owned()),
+                ("after".to_owned(), "current".to_owned())
+            ]
+        );
+
+        pagination.apply(&mut request, None)?;
+
+        assert_eq!(request.url().query(), Some("keep=yes"));
+        Ok(())
+    }
+
+    #[test]
     fn page_number_stops_on_a_partial_page() -> Result<(), Box<dyn std::error::Error>> {
         let page_size = NonZeroUsize::new(2).ok_or("page size must be nonzero")?;
         let pagination = PageNumberPagination::new("page", 1, page_size)?;
@@ -307,6 +358,32 @@ mod tests {
     }
 
     #[test]
+    fn page_number_replaces_existing_query_parameters() -> Result<(), Box<dyn std::error::Error>> {
+        let page_size = NonZeroUsize::new(2).ok_or("page size must be nonzero")?;
+        let pagination = PageNumberPagination::new("page", 1, page_size)?;
+        let mut request = Request::new(
+            Method::GET,
+            Url::parse("https://example.test/items?page=99&keep=yes&page=100")?,
+        );
+
+        pagination.apply(&mut request, None)?;
+
+        let pairs = request
+            .url()
+            .query_pairs()
+            .map(|(name, value)| (name.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            pairs,
+            vec![
+                ("keep".to_owned(), "yes".to_owned()),
+                ("page".to_owned(), "1".to_owned())
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn page_number_reports_overflow() -> Result<(), Box<dyn std::error::Error>> {
         let page_size = NonZeroUsize::new(2).ok_or("page size must be nonzero")?;
         let pagination = PageNumberPagination::new("page", 1, page_size)?;
@@ -328,8 +405,17 @@ mod tests {
 
     #[test]
     fn cursor_pagination_rejects_an_invalid_pointer() {
-        let result = CursorPagination::new("cursor", "next");
+        for pointer in ["next", "/next~2cursor", "/next~"] {
+            let result = CursorPagination::new("cursor", pointer);
 
-        assert!(matches!(result, Err(PaginationError::InvalidJsonPointer)));
+            assert!(matches!(result, Err(PaginationError::InvalidJsonPointer)));
+        }
+    }
+
+    #[test]
+    fn cursor_pagination_accepts_valid_pointer_escapes() -> Result<(), Box<dyn std::error::Error>> {
+        let _pagination = CursorPagination::new("cursor", "/a~0b/~1c")?;
+
+        Ok(())
     }
 }

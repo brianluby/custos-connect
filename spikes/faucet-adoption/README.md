@@ -15,14 +15,15 @@ replace a new Custos-owned connector and ingestion SDK.
 ## Scope
 
 The package is a disposable compatibility probe. It is not a public Custos API
-and is not publishable. Dependency versions are exact so a future rerun tests
-the same Faucet release reviewed by the spike.
+and is not publishable. Faucet dependency versions are exact so a future rerun
+tests the same Faucet releases reviewed by the spike; the workspace root
+`Cargo.lock` controls the remaining dependency graph.
 
 ## Commands
 
 ```console
-cargo test -p custos-connect-faucet-spike
-cargo clippy -p custos-connect-faucet-spike --all-targets -- -D warnings
+cargo test -p custos-connect-faucet-spike --locked
+cargo clippy -p custos-connect-faucet-spike --all-targets --locked -- -D warnings
 ```
 
 ## Results

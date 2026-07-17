@@ -120,31 +120,36 @@ async fn typed_stream_preserves_authenticated_pagination_and_checkpoint()
 #[tokio::test]
 async fn pipeline_resumes_from_a_durable_bookmark() -> Result<(), Box<dyn std::error::Error>> {
     let state_dir = tempfile::tempdir()?;
-    let store: Arc<dyn StateStore> = Arc::new(FileStateStore::new(state_dir.path()));
+    let first_store: Arc<dyn StateStore> = Arc::new(FileStateStore::new(state_dir.path()));
 
     let first_server = MockServer::start().await;
     mount_paginated_feed(&first_server, 3, "2026-07-17").await;
     let first_source = RestStream::new(source_config(&first_server))?;
     let first_sink = RecordingSink::default();
     let first_result = Pipeline::new(&first_source, &first_sink)
-        .with_state_store(Arc::clone(&store))
+        .with_state_store(Arc::clone(&first_store))
         .run()
         .await?;
 
     assert_eq!(first_result.records_written, 3);
-    assert_eq!(store.get("events").await?, Some(json!("2026-07-17")));
+    assert_eq!(first_store.get("events").await?, Some(json!("2026-07-17")));
+    drop(first_store);
 
     let second_server = MockServer::start().await;
+    let resumed_store: Arc<dyn StateStore> = Arc::new(FileStateStore::new(state_dir.path()));
     mount_paginated_feed(&second_server, 4, "2026-07-18").await;
     let second_source = RestStream::new(source_config(&second_server))?;
     let second_sink = RecordingSink::default();
     let second_result = Pipeline::new(&second_source, &second_sink)
-        .with_state_store(Arc::clone(&store))
+        .with_state_store(Arc::clone(&resumed_store))
         .run()
         .await?;
 
     assert_eq!(second_result.records_written, 1);
     assert_eq!(second_sink.snapshot().await[0]["id"], 4);
-    assert_eq!(store.get("events").await?, Some(json!("2026-07-18")));
+    assert_eq!(
+        resumed_store.get("events").await?,
+        Some(json!("2026-07-18"))
+    );
     Ok(())
 }

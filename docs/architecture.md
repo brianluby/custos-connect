@@ -80,9 +80,9 @@ The caller must first durably consume that page's records and only then persist
 its checkpoint. A crash before the checkpoint save may replay records; a crash
 cannot cause records to be skipped by an eager SDK checkpoint write.
 
-Connectors and sinks should therefore be replay-tolerant or idempotent. Exact
-once delivery is outside this SDK because it requires a transaction spanning
-the caller's sink and checkpoint store.
+Connectors and sinks should therefore be replay-tolerant or idempotent.
+Exactly-once delivery is outside this SDK because it requires a transaction
+spanning the caller's sink and checkpoint store.
 
 ## Failure behavior
 

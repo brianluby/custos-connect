@@ -15,7 +15,7 @@ use reqwest::{
 };
 use secrecy::{ExposeSecret, SecretString};
 use thiserror::Error;
-use tower::{Layer, Service, ServiceExt};
+use tower::{Layer, Service};
 
 use crate::transport::HttpError;
 
@@ -330,41 +330,74 @@ where
     type Error = HttpError;
     type Future = Pin<Box<dyn Future<Output = Result<Response, HttpError>> + Send>>;
 
-    fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_ready(&mut self, context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner
+            .poll_ready(context)
+            .map(|result| result.map_err(HttpError::Transport))
     }
 
     fn call(&mut self, mut request: Request) -> Self::Future {
         let authenticator = self.authenticator.clone();
         let replacement = self.inner.clone();
-        let inner = std::mem::replace(&mut self.inner, replacement);
+        let mut inner = std::mem::replace(&mut self.inner, replacement);
 
         Box::pin(async move {
             validate_auth_transport(request.url(), authenticator.credential_transport())?;
             authenticator.authenticate(&mut request).await?;
-            inner.oneshot(request).await.map_err(HttpError::Transport)
+            inner.call(request).await.map_err(HttpError::Transport)
         })
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        future::Pending,
+        task::{Context, Poll, Waker},
+    };
+
     use reqwest::{
         Method, Request, Url,
         header::{AUTHORIZATION, HeaderName},
     };
     use secrecy::SecretString;
+    use tower::{Layer, Service};
 
     use super::{
-        ApiKeyAuth, AuthError, Authenticator, BasicAuth, BearerAuth, CredentialTransport, NoAuth,
-        validate_auth_transport,
+        ApiKeyAuth, AuthError, AuthLayer, Authenticator, BasicAuth, BearerAuth,
+        CredentialTransport, NoAuth, validate_auth_transport,
     };
+
+    #[derive(Clone, Copy)]
+    struct PendingHttpService;
+
+    impl Service<Request> for PendingHttpService {
+        type Response = reqwest::Response;
+        type Error = reqwest::Error;
+        type Future = Pending<Result<Self::Response, Self::Error>>;
+
+        fn poll_ready(&mut self, _context: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+            Poll::Pending
+        }
+
+        fn call(&mut self, _request: Request) -> Self::Future {
+            std::future::pending()
+        }
+    }
 
     fn test_request() -> Result<Request, Box<dyn std::error::Error>> {
         Ok(Request::new(
             Method::GET,
             Url::parse("https://example.test")?,
         ))
+    }
+
+    #[test]
+    fn auth_service_forwards_inner_readiness() {
+        let mut service = AuthLayer::new(NoAuth).layer(PendingHttpService);
+        let mut context = Context::from_waker(Waker::noop());
+
+        assert!(service.poll_ready(&mut context).is_pending());
     }
 
     #[tokio::test]
