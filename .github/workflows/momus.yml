@@ -1,0 +1,21 @@
+# momus: review each pull request and post inline comments.
+# Needs a TYPESAFE_API_KEY repository secret. Added by
+# https://github.com/brianluby/momus-review/blob/main/scripts/rollout.sh
+name: momus
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    uses: brianluby/momus-review/.github/workflows/review.yml@v0
+    secrets:
+      TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
+    # with:
+    #   exclude: |
+    #     vendor/**
+    #   fail-on-blocking: false
