@@ -1,0 +1,8 @@
+# Keeps pinned GitHub Actions and reusable workflows (including the momus
+# review workflow) up to date: each upgrade arrives as a pull request.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
