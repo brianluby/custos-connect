@@ -1,6 +1,8 @@
 # momus: review each pull request and post inline comments.
 # Needs a TYPESAFE_API_KEY repository secret. Added by
-# https://github.com/brianluby/momus-review/blob/main/scripts/rollout.sh
+# https://github.com/brianluby/momus-review/blob/main/scripts/rollout.sh,
+# which pins `@v0` below to the latest release's commit SHA; Dependabot
+# (.github/dependabot.yml, github-actions) then proposes upgrades as PRs.
 name: momus
 
 on:
@@ -12,7 +14,9 @@ permissions:
 
 jobs:
   review:
-    uses: brianluby/momus-review/.github/workflows/review.yml@v0
+    # Fork pull requests get no secrets: skip them instead of starting a runner.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    uses: brianluby/momus-review/.github/workflows/review.yml@c3f43c59011deb79437ad45293f78e3c577bbd01 # v0.1.2
     secrets:
       TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
     # with:
