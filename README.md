@@ -23,6 +23,14 @@ required caller-composable Tower/governor service boundary. The SDK therefore
 owns only that narrower connector seam and leaves persistence, sinks, and job
 orchestration to applications.
 
+## Minimum Rust version
+
+The workspace minimum is Rust 1.94.0, aligned with Custos core. The existing CI
+MSRV job reads the exact declared version and runs all workspace targets and
+features with the committed lockfile. Source acceptance requires that job to
+pass at the reviewed head; a library CI result does not establish a consumer
+adoption or a published release.
+
 ## Verify
 
 ```console
