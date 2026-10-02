@@ -62,6 +62,9 @@ pub enum CredentialTransport {
 /// remain valid for the configured retry sequence. Unauthorized responses are
 /// returned to the connector rather than retried.
 #[async_trait]
+// async-trait adds #[must_use] to boxed Future returns; Future already carries
+// that lint. Keep its warning while avoiding the redundant-attribute lint.
+#[allow(clippy::double_must_use)]
 pub trait Authenticator: Clone + Send + Sync + 'static {
     /// Return the transport policy enforced before [`Self::authenticate`].
     ///

@@ -93,6 +93,9 @@ impl<'a, Cursor, Checkpoint> SyncPosition<'a, Cursor, Checkpoint> {
 
 /// Connector-specific request construction and page decoding.
 #[async_trait]
+// async-trait adds #[must_use] to boxed Future returns; Future already carries
+// that lint. Keep its warning while avoiding the redundant-attribute lint.
+#[allow(clippy::double_must_use)]
 pub trait Source: Send + Sync {
     /// Record emitted by this source.
     type Record: Send + 'static;

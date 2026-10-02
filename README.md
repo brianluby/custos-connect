@@ -23,6 +23,18 @@ required caller-composable Tower/governor service boundary. The SDK therefore
 owns only that narrower connector seam and leaves persistence, sinks, and job
 orchestration to applications.
 
+## Minimum Rust version
+
+The publishable SDK minimum is Rust 1.94.0, aligned with Custos core. Its CI
+MSRV job reads the exact declared version and tests every SDK target and feature
+with the committed lockfile. The unpublished Faucet evaluation binary separately
+declares Rust 1.96.0 because its pinned Faucet 1.4.0/1.2.2 dependencies require it;
+a separate exact-toolchain job tests every evaluation target and feature. Stable
+formatting, lint, tests, documentation and supply-chain checks still cover the
+whole workspace. No dependency or license is changed to lower the SDK minimum.
+Source acceptance requires the checks to pass at the reviewed head; library CI
+does not establish a Custos consumer adoption or a published release.
+
 ## Verify
 
 ```console
