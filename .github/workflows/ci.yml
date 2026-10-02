@@ -54,5 +54,17 @@ jobs:
           msrv=$(sed -n 's/^rust-version = "\(.*\)"/\1/p' Cargo.toml)
           rustup toolchain install "$msrv" --profile minimal
           echo "MSRV=$msrv" >> "$GITHUB_ENV"
-      - name: Test all targets and features
-        run: cargo "+$MSRV" test --workspace --all-targets --all-features --locked
+      - name: Test the publishable SDK on its exact minimum Rust version
+        run: cargo "+$MSRV" test -p custos-connect --all-targets --all-features --locked
+
+  faucet-spike-msrv:
+    name: Private Faucet evaluation minimum Rust
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@8e8c483db84b4bee98b60c0593521ed34d9990e8
+        with:
+          persist-credentials: false
+      - name: Install the evaluation minimum Rust version
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Test all evaluation targets and features
+        run: cargo +1.96.0 test -p custos-connect-faucet-spike --all-targets --all-features --locked
