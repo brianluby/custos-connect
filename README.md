@@ -45,3 +45,8 @@ cargo test --workspace --doc --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 cargo package -p custos-connect --locked
 ```
+
+## Licensing
+
+This shared library is dual-licensed under `MIT OR Apache-2.0`, at your option.
+See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).

@@ -101,3 +101,8 @@ explicit and prevents advancing state ahead of the records it represents.
 
 See the workspace integration tests for a complete bearer-authenticated,
 cursor-paginated source.
+
+## Licensing
+
+This shared library is dual-licensed under `MIT OR Apache-2.0`, at your option.
+See [LICENSE-MIT](LICENSE-MIT) and [LICENSE-APACHE](LICENSE-APACHE).
