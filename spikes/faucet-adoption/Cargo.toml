@@ -3,7 +3,8 @@ name = "custos-connect-faucet-spike"
 version = "0.0.0"
 publish = false
 edition.workspace = true
-rust-version.workspace = true
+# The private evaluation uses Faucet releases requiring 1.96; the SDK does not.
+rust-version = "1.96.0"
 license.workspace = true
 
 [lints]
